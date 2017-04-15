@@ -1,0 +1,171 @@
+---
+title: "Tennis Player Survival Analysis with Shiny"
+runtime: shiny
+output: html_document
+---
+```{r , echo = FALSE, warning = FALSE, message = FALSE, results='hide'}
+library(data.table)
+library(purrr)
+library(ggplot2)
+library(caret)
+library(dplyr)
+full_data <- read.csv("ATP.csv", stringsAsFactors = FALSE)
+#Convertion of the variables is copied and pasted by Sijo VM, thanks!
+number_columns <- c("winner_ht", "winner_age","loser_ht","loser_age" )
+factor_columns <- c("tourney_id","surface", "draw_size", "tourney_level", "winner_id", "winner_entry",
+                    "winner_hand", "winner_ioc", "loser_id", "loser_entry","loser_hand",
+                    "loser_ioc","best_of","round") 
+
+integer_columns <- c("match_num" ,"winner_seed","winner_rank","winner_rank_points","loser_seed",
+                     "loser_rank", "loser_rank_points","minutes", "w_ace","w_df", "w_svpt","w_1stIn",
+                     "w_1stWon","w_2ndWon","w_SvGms", "w_bpSaved", "w_bpFaced","l_ace","l_df","l_svpt",
+                     "l_1stIn","l_1stWon","l_2ndWon","l_SvGms", "l_bpSaved","l_bpFaced")
+character_columns <- c("tourney_name", "tourney_date","winner_name", "loser_name", "score")
+
+for(i in number_columns){
+  full_data[,i] <- as.numeric(full_data[,i])
+} 
+for(i in factor_columns){
+  full_data[,i] <- as.factor(full_data[,i])
+}  
+for(i in integer_columns){
+  full_data[,i] <- as.integer(full_data[,i])
+}  
+for(i in character_columns){
+  full_data[,i] <- as.character(full_data[,i])
+}
+
+
+full <- as.data.table(full_data)
+When_did_Roger_win <- function(Name){
+#When I like to improve the function, I uncomment the player with the most wins:
+#Name = "Roger Federer" 
+
+Player <- full[full$winner_name == Name| full$loser_name == Name]
+setkey(Player, winner_name)
+as.character(Player$winner_name)
+#If the chosen player is winner_name, he gets a 1, if not, he gets a 0.
+Player[Name, survival:= 1]
+Player[!Name, survival:= 0]
+
+#If either the winner or the loser, or both are not seeded, a 0 is inserted.
+Player$winner_seed[is.na(Player$winner_seed)]<-0
+Player$loser_seed[is.na(Player$loser_seed)]<-0
+
+#If the winner has a better seed then the loser, a 1 is inserted
+Player[winner_seed < loser_seed & loser_seed != 0 , better_seed:= 1]
+Player[winner_seed >= loser_seed, better_seed:= 0]
+
+Player[as.character(winner_entry) == as.character(loser_entry), same_entry:= 1]
+Player[as.character(winner_entry) != as.character(loser_entry), same_entry:= 0]
+
+#Does size matter? If the winner is taller than the loser, we insert a 1.
+Player$winner_ht[is.na(Player$winner_ht)]<-0
+Player$loser_ht[is.na(Player$loser_ht)]<-0
+Player[winner_ht > loser_ht , taller:= 1]
+Player[winner_ht <= loser_ht , taller:= 0]
+
+#Does the playing hand matter for the survival analysis?
+Player[as.character(winner_hand) == as.character(loser_hand), same_hand := 0]
+Player[as.character(winner_hand) != as.character(loser_hand), same_hand := 1]
+#Player[,table(is.na(same_hand))]
+#table(is.na(Player))
+
+#Do older players play better? 
+Player$winner_age[is.na(Player$winner_age)]<-0
+Player$loser_age[is.na(Player$loser_age)]<-0
+
+Player[winner_age > loser_age & loser_age != 0, older:= 1]
+Player[winner_age <= loser_age |loser_age == 0 | winner_age == 0, older:= 0]
+#Player[,table(older)]
+#table(is.na(Player))
+
+#If the winner ranks in the overall ATP ranking before the loser, a 1 is inserted.
+
+Player$winner_rank[is.na(Player$winner_rank)]<-0
+Player$loser_rank[is.na(Player$loser_rank)]<-0
+Player[winner_rank < loser_rank, better_ranked:= 1]
+Player[winner_rank >= loser_rank | loser_rank ==0, better_ranked:= 0]
+
+
+#This variable insert a 1 if the games take longer than the median,the minutes variable will be included as well.
+Player$minutes[is.na(Player$minutes)]<-0.1
+median_played <- median(Player$minutes, na.rm = TRUE)
+Player[minutes > median_played , overtime:= 1]
+Player[minutes <= median_played & minutes >2, overtime:= 0]
+Player[minutes < 3, overtime:= 2]
+
+#This is no modification to the best_of variable, but improves
+best_of_three <- 3
+best_of_five <- 5
+Player[best_of == best_of_five, distance:= 1]
+Player[best_of == best_of_three, distance:= 0]
+Player[best_of == 0, distance:= 2]
+
+variables<-Player[,.(survival, same_entry, taller, same_hand, older,
+          better_ranked, surface, better_seed, distance)]
+
+set.seed(1)
+rows <- sample(nrow(variables))
+variables<-variables[rows,]
+split<-round(nrow(variables)* 0.6)
+train <- variables[1:split,]
+test <- variables[(split+1):nrow(variables)] 
+nrow(train) / nrow(variables)
+
+model <- train(factor(survival)~. ,
+               tuneLength = 3, #the more the costlier
+               data = train, method = "ranger",
+               importance = 'impurity', #Has to be included
+               trControl = trainControl(method = "cv", number = 5, verboseIter = TRUE),
+               classification = TRUE)
+#plot(model)
+
+result_test = predict(model, test, "raw")
+#result_test
+confu <- confusionMatrix(result_test, test$survival)
+varimps <- varImp(model)
+print(confu)
+
+plot(varimps, main = Name)
+
+}
+
+hall_of_fame <- sort(table(full$winner_name),decreasing=TRUE)[1:50]
+as.vector(hall_of_fame)
+top_player <- names(hall_of_fame)
+top_player
+```
+#Variable Importance Measure
+The Variable Importance Measure shows which variables of opponent, surface and game duration matter in order to termine a victory. For the random forest approach only out-of-the-game variables are inclued, since they are known before the game. All variables are processed to `0` or `1` variables, except the `surface` variable.
+The variables include:
+
+* **better_ranked** Is the winner better ranked than the loser? 
+
+* **older** Is the winner `older` than the loser?
+
+* **surface** What surface has the match been played on: `Carpet`, `Hard`, `Grass`or `Clay`?
+
+* **better_seed** Is the winner better ranked than the loser?
+
+* **taller** Is the winner taller than the loser?
+
+* **same_entry** Did any of the player entry via wildcard or qualification?
+
+* **same_hand** Do the player's hand matter?
+
+* **distance** Did the game take longer than the median?
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+```{r shiny, echo=FALSE}
+inputPanel(
+  selectInput("Players", label = "Number of bins:",
+              choices = top_player, selected = "Roger Federer")
+)
+
+renderPlot({
+  When_did_Roger_win(input$Players)
+})
+```
