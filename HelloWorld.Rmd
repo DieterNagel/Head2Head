@@ -1,0 +1,326 @@
+---
+title: "Shiny ATP"
+author: "Dieter Nagel"
+output: html_document
+runtime: shiny
+---
+## Head to Head 
+
+The ATP dataset includes all kind of in-game and general out-of-the-game statistics. The following tries to make use of the in-game statistics in order to make comparisons between two players and the times they play each other. I used to play Tennis in childhood and follow it ever since. The stats are not intuitive and anyone not familiar with the game will have a hard time to figure out what the abbreviations stand for and how to make use of the given variables. 
+```{r packages , message = FALSE, echo=FALSE, results='hide', warning=FALSE}
+#These are the packages used.
+library(data.table)
+library(purrr)
+library(ggplot2)
+library(dplyr)
+library(gridExtra)
+library(shiny)
+
+```
+```{r loading , echo=TRUE, warning=FALSE}
+full_data <- read.csv("ATP.csv", stringsAsFactors = FALSE)
+str(full_data)
+```
+```{r prework , echo=TRUE, results='hide', warning=FALSE}
+#Convertion of the variables is copied and pasted by Sijo VM, thanks!
+#It could be done more efficiently, but it works and we have no hurry.
+number_columns <- c("winner_ht", "winner_age","loser_ht","loser_age" )
+factor_columns <- c("tourney_id","surface", "draw_size", "tourney_level", "winner_id", "winner_entry",
+                    "winner_hand", "winner_ioc", "loser_id", "loser_entry","loser_hand",
+                    "loser_ioc","best_of","round") 
+
+integer_columns <- c("match_num" ,"winner_seed","winner_rank","winner_rank_points","loser_seed",
+                     "loser_rank", "loser_rank_points","minutes", "w_ace","w_df", "w_svpt","w_1stIn",
+                     "w_1stWon","w_2ndWon","w_SvGms", "w_bpSaved", "w_bpFaced","l_ace","l_df","l_svpt",
+                     "l_1stIn","l_1stWon","l_2ndWon","l_SvGms", "l_bpSaved","l_bpFaced")
+character_columns <- c("tourney_name", "tourney_date","winner_name", "loser_name", "score")
+for(i in number_columns){
+  full_data[,i] <- as.numeric(full_data[,i])
+} 
+for(i in factor_columns){
+  full_data[,i] <- as.factor(full_data[,i])
+}  
+for(i in integer_columns){
+  full_data[,i] <- as.integer(full_data[,i])
+}  
+for(i in character_columns){
+  full_data[,i] <- as.character(full_data[,i])
+}
+#Here is the function with three arguments, two players and a variable.
+#As default, Pete Sampras, Andre Agassi and are taken as arguments
+head_to_head <- function(x = "Pete Sampras", y = "Andre Agassi", w = "w_ace"){
+filtered_data = filter(full_data, winner_name == x & loser_name == y | 
+                         winner_name == y & loser_name == x)
+selected_data = select(filtered_data, winner_name, loser_name, score, w_ace, l_ace, w_df, 
+                       l_df, w_svpt, l_svpt, w_1stIn,
+                       l_1stIn, w_1stWon, l_1stWon, w_2ndWon,l_2ndWon,
+                       w_bpSaved, l_bpSaved, w_bpFaced,l_bpFaced, surface)
+cleaned_data <- selected_data[complete.cases(selected_data),]
+#Several variables need to be derived from the given stats.
+#The meaning of the derived variables can be seen on the y-axis, when included in the plot.
+#The adding and rounding is done in order to avoid NaN. 
+final_data = mutate(cleaned_data,
+                    w_breaks = w_bpFaced - w_bpSaved,
+                    l_breaks = l_bpFaced - l_bpSaved,
+                    w_break_conversion = round((w_bpFaced - w_bpSaved)/(w_bpFaced+0.00001)*100, digits = 2),
+                    l_break_conversion = round((l_bpFaced - l_bpSaved)/(l_bpFaced+0.00001)*100, digits = 2),
+                    w_1stInPercentage = w_1stIn/w_svpt*100,
+                    l_1stInPercentage = l_1stIn/l_svpt*100,  
+                    w_1stInWonPercentage = w_1stWon/w_1stIn*100,   
+                    l_1stInWonPercentage = l_1stWon/l_1stIn*100,
+                    w_2ndIn = w_svpt-w_1stIn-w_df,
+                    l_2ndIn = l_svpt-l_1stIn-l_df,
+                    w_2ndInPercentage = (w_2ndIn-w_df)/w_2ndIn*100,
+                    l_2ndInPercentage = (l_2ndIn-l_df)/l_2ndIn*100,
+                    w_2ndWonPercentage = w_2ndWon/w_2ndIn*100, 
+                    l_2ndWonPercentage =  l_2ndWon/l_2ndIn*100,
+                    w_dfPercentage = w_df/w_svpt*100,
+                    l_dfPercentage = l_df/l_svpt*100
+                    ) 
+#Boxplots reveal many information here and are therefore taken.
+if(w == "w_ace" | w =="l_ace"){
+plot1<-ggplot(final_data, aes(x = winner_name, y = w_ace, 
+              fill = factor(surface))) + 
+              geom_boxplot(na.rm = TRUE) +
+              scale_y_continuous() +
+              labs(x = "Winner Name", y = "Winner Aces", fill = "Surface");  
+plot2<-ggplot(final_data, aes(x = loser_name, y = l_ace,
+              fill = factor(surface))) +
+              geom_boxplot(na.rm = TRUE) +
+              scale_y_continuous() +
+              labs(x = "Loser Name", y = "Loser Aces" , fill = "Surface");
+  grid.arrange(plot1, plot2, ncol=2)
+  }
+if(w == "w_df"|w == "l_df"){
+  plot1<-ggplot(final_data, aes(x = winner_name, y = w_df, 
+              fill = factor(surface))) + 
+              geom_boxplot(na.rm = TRUE) +
+              scale_y_continuous() +
+              labs(x = "Winner Name", y = "Winner Double Faults", fill = "Surface");  
+  plot2<-ggplot(final_data, aes(x = loser_name, y = l_df,
+              fill = factor(surface))) +
+              geom_boxplot(na.rm = TRUE) +
+              scale_y_continuous() +
+              labs(x = "Loser Name", y = "Loser Double Faults" , fill = "Surface");
+  grid.arrange(plot1, plot2, ncol=2)}
+if(w == "w_svpt" | w == "l_svpt"){ 
+  plot1<-ggplot(final_data, aes(x = winner_name, y = w_svpt, 
+              fill = factor(surface))) + 
+              geom_boxplot(na.rm = TRUE) +
+              scale_y_continuous() +
+              labs(x = "Winner Name", y = "Winner Served", fill = "Surface");  
+  plot2<-ggplot(final_data, aes(x = loser_name, y = l_svpt,
+              fill = factor(surface))) +
+              geom_boxplot(na.rm = TRUE) +
+              scale_y_continuous() +
+              labs(x = "Loser Name", y = "Loser Served" , fill = "Surface");
+  grid.arrange(plot1, plot2, ncol=2)} 
+if(w == "w_1stIn" | w == "l_1stIn"){
+  plot1<-ggplot(final_data, aes(x = winner_name, y = w_1stIn, 
+              fill = factor(surface))) + 
+              geom_boxplot(na.rm = TRUE) +
+              scale_y_continuous() +
+              labs(x = "Winner Name", y = "Winner 1st Serve In", fill = "Surface");  
+  plot2<-ggplot(final_data, aes(x = loser_name, y = l_1stIn,
+              fill = factor(surface))) +
+              geom_boxplot(na.rm = TRUE) +
+              scale_y_continuous() +
+              labs(x = "Loser Name", y = "Loser 1st Serve In" , fill = "Surface");
+  grid.arrange(plot1, plot2, ncol=2)}
+if(w == "w_1stWon" | w == "l_1stWon"){ 
+ plot1<-ggplot(final_data, aes(x = winner_name, y = w_1stWon, 
+              fill = factor(surface))) + 
+              geom_boxplot(na.rm = TRUE) +
+              scale_y_continuous() +
+              labs(x = "Winner Name", y = "Winner 1st Serve and Won Points", fill = "Surface");  
+  plot2<-ggplot(final_data, aes(x = loser_name, y = l_1stWon,
+              fill = factor(surface))) +
+              geom_boxplot(na.rm = TRUE) +
+              scale_y_continuous() +
+              labs(x = "Loser Name", y = "Loser 1st Serve and Won Points" , fill = "Surface");
+  grid.arrange(plot1, plot2, ncol=2)}
+if(w == "w_2ndWon" | w == "l_2ndWon"){ 
+  plot1<-ggplot(final_data, aes(x = winner_name, y = w_2ndWon, 
+              fill = factor(surface))) + 
+              geom_boxplot(na.rm = TRUE) +
+              scale_y_continuous() +
+              labs(x = "Winner Name", y = "Winner 2nd Serve and Won Points", fill = "Surface");  
+  plot2<-ggplot(final_data, aes(x = loser_name, y = l_2ndWon,
+              fill = factor(surface))) +
+              geom_boxplot(na.rm = TRUE) +
+              scale_y_continuous() +
+              labs(x = "Loser Name", y = "Loser 2nd Serve and Won Points" , fill = "Surface");
+  grid.arrange(plot1, plot2, ncol=2)}
+if(w == "w_bpSaved" | w == "l_bpSaved"){
+  plot1<-ggplot(final_data, aes(x = winner_name, y = w_bpSaved, 
+              fill = factor(surface))) + 
+              geom_boxplot(na.rm = TRUE) +
+              scale_y_continuous() +
+              labs(x = "Winner Name", y = "Winner Break Points Saved", fill ="Surface");  
+  plot2<-ggplot(final_data, aes(x = loser_name, y = l_bpSaved,
+              fill = factor(surface))) +
+              geom_boxplot(na.rm = TRUE) +
+              scale_y_continuous() +
+              labs(x = "Loser Name", y = "Loser Break Points Saved" , fill = "Surface");
+  grid.arrange(plot1, plot2, ncol=2)}
+if(w == "w_bpFaced" | w == "l_bpFaced"){
+  plot1<-ggplot(final_data, aes(x = winner_name, y = w_bpFaced, 
+              fill = factor(surface))) + 
+              geom_boxplot(na.rm = TRUE) +
+              scale_y_continuous() +
+              labs(x = "Winner Name", y = "Winner Break Points Faced", fill = "Surface");  
+  plot2<-ggplot(final_data, aes(x = loser_name, y = l_bpFaced,
+              fill = factor(surface))) +
+              geom_boxplot(na.rm = TRUE) +
+              scale_y_continuous() +
+              labs(x = "Loser Name", y = "Loser Break Points Faced" , fill = "Surface");
+  grid.arrange(plot1, plot2, ncol=2)}
+if(w == "w_breaks" | w == "l_breaks"){
+   plot1<-ggplot(final_data, aes(x = winner_name, y = w_breaks, 
+              fill = factor(surface))) + 
+              geom_boxplot(na.rm = TRUE) +
+              scale_y_continuous() +
+              labs(x = "Winner Name", y = "Winner Breaks", fill = "Surface");  
+  plot2<-ggplot(final_data, aes(x = loser_name, y = l_breaks,
+              fill = factor(surface))) +
+              geom_boxplot(na.rm = TRUE) +
+              scale_y_continuous() +
+              labs(x = "Loser Name", y =  "Loser Breaks" , fill = "Surface");
+  grid.arrange(plot1, plot2, ncol=2)}
+if(w == "w_break_conversion" | w == "l_break_conversion"){
+  plot1<-ggplot(final_data, aes(x = winner_name, y = w_break_conversion, 
+              fill = factor(surface))) + 
+              geom_boxplot(na.rm = TRUE) +
+              scale_y_continuous() +
+              labs(x = "Winner Name", y = "Winner Break Conversion Rate", fill = "Surface");  
+  plot2<-ggplot(final_data, aes(x = loser_name, y = l_break_conversion,
+              fill = factor(surface))) +
+              geom_boxplot(na.rm = TRUE) +
+              scale_y_continuous() +
+              labs(x = "Loser Name", y =  "Loser Break Conversion Rate" , fill = "Surface");
+  grid.arrange(plot1, plot2, ncol=2)}
+if(w == "w_1stInPercentage"| w == "l_1stInPercentage"){
+plot1<-ggplot(final_data, aes(x = winner_name, y = w_1stInPercentage, 
+              fill = factor(surface))) + 
+              geom_boxplot(na.rm = TRUE) +
+              scale_y_continuous() +
+              labs(x = "Winner Name", y = "Winner 1st Serve In Percentage" , fill = "Surface");  
+  plot2<-ggplot(final_data, aes(x = loser_name, y = l_1stInPercentage,
+              fill = factor(surface))) +
+              geom_boxplot(na.rm = TRUE) +
+              scale_y_continuous() +
+              labs(x = "Loser Name", y =  "Loser 1st Serve In Percentage" , fill = "Surface");
+  grid.arrange(plot1, plot2, ncol=2)}
+if(w == "w_1stInWonPercentage" | w == "l_1stInWonPercentage"){
+plot1<-ggplot(final_data, aes(x = winner_name, y = w_1stInWonPercentage, 
+              fill = factor(surface))) + 
+              geom_boxplot(na.rm = TRUE) +
+              scale_y_continuous() +
+              labs(x = "Winner Name", y = "Winner 1st Serve and Won Percentage"  , fill = "Surface");  
+plot2<-ggplot(final_data, aes(x = loser_name, y = l_1stInWonPercentage,
+              fill = factor(surface))) +
+              geom_boxplot(na.rm = TRUE) +
+              scale_y_continuous() +
+              labs(x = "Loser Name", y =  "Loser 1st Serve and Won Percentage" , fill = "Surface");
+  grid.arrange(plot1, plot2, ncol=2)}
+if(w == "w_2ndIn" | w == "l_2ndIn"){
+plot1<-ggplot(final_data, aes(x = winner_name, y = w_2ndIn, 
+              fill = factor(surface))) + 
+              geom_boxplot(na.rm = TRUE) +
+              scale_y_continuous() +
+              labs(x = "Winner Name", y = "Winner 2nd Serve In"  , fill = "Surface");  
+plot2<-ggplot(final_data, aes(x = loser_name, y = l_2ndIn,
+              fill = factor(surface))) +
+              geom_boxplot(na.rm = TRUE) +
+              scale_y_continuous() +
+              labs(x = "Loser Name", y =  "Loser 2nd Serve In" , fill = "Surface");
+  grid.arrange(plot1, plot2, ncol=2)
+}
+if(w == "w_2ndInPercentage" | w == "l_2ndInPercentage"){
+plot1<-ggplot(final_data, aes(x = winner_name, y = w_2ndInPercentage, 
+              fill = factor(surface))) + 
+              geom_boxplot(na.rm = TRUE) +
+              scale_y_continuous() +
+              labs(x = "Winner Name", y = "Winner 2nd Serve In Percentage"  , fill = "Surface");  
+plot2<-ggplot(final_data, aes(x = loser_name, y = l_2ndInPercentage,
+              fill = factor(surface))) +
+              geom_boxplot(na.rm = TRUE) +
+              scale_y_continuous() +
+              labs(x = "Loser Name", y = "Loser 2nd Serve In Percentage" , fill = "Surface");
+  grid.arrange(plot1, plot2, ncol=2)
+}
+if(w == "w_2ndWonPercentage" | w == "l_2ndWonPercentage"){
+plot1<-ggplot(final_data, aes(x = winner_name, y = w_2ndWonPercentage, 
+              fill = factor(surface))) + 
+              geom_boxplot(na.rm = TRUE) +
+              scale_y_continuous() +
+              labs(x = "Winner Name", y = "Winner 2nd Serve In and Won Percentage", fill = "Surface");  
+plot2<-ggplot(final_data, aes(x = loser_name, y = l_2ndWonPercentage,
+              fill = factor(surface))) +
+              geom_boxplot(na.rm = TRUE) +
+              scale_y_continuous() +
+              labs(x = "Loser Name", y = "Loser 2nd Serve In and Won Percentage", fill = "Surface");
+  grid.arrange(plot1, plot2, ncol=2)
+}
+if(w == "w_dfPercentage" | w == "l_dfPercentage"){z = 
+plot1<-ggplot(final_data, aes(x = winner_name, y = w_dfPercentage, 
+              fill = factor(surface))) + 
+              geom_boxplot(na.rm = TRUE) +
+              scale_y_continuous() +
+              labs(x = "Winner Name", y = "Winner Double Faults Percentage", fill = "Surface");  
+plot2<-ggplot(final_data, aes(x = loser_name, y = l_dfPercentage,
+              fill = factor(surface))) +
+              geom_boxplot(na.rm = TRUE) +
+              scale_y_continuous() +
+              labs(x = "Loser Name", y = "Loser Double Faults Percentage", fill = "Surface");
+  grid.arrange(plot1, plot2, ncol=2)
+}
+if(w == "winner_name" | w == "loser_name"){
+  plot2<-ggplot(final_data, aes(x = loser_name, fill = factor(surface))) +
+  geom_bar(stat='count', position='dodge', na.rm = TRUE) +
+  labs(x = 'Loser Name', fill = "Surface")
+  plot1<-ggplot(final_data, aes(x = winner_name, fill = factor(surface))) +
+  geom_bar(stat='count', position='dodge', na.rm = TRUE) +
+  labs(x = 'Winner Name', fill = "Surface")
+  grid.arrange(plot1, plot2, ncol=2)
+}
+}
+```
+## Function Inclusion
+For the shiny application only `Novak Djokovic`, `Rafael Nadal`, `Andy Murray` and of course `Roger Federer` are the players to chose from. The input variables allow to compare the players, where many calculated in-game variables are added to the existing.
+The variables are only taken, when both players participate in the matches.  
+On the left hand plot, the times when `Player A` won against `B` and `Player B` won against `A` are shown. 
+On the right hand plot only the matches are shown, when `Player A` lost to `Player B` and `Player B` lost to `Player A`. The plots distinguish between three different surfaces: `Clay`, `Grass` and `Hard`. Take a look at the two players `Roger Federer` and `Rafael Nadal`. Choose the variable `w_ace`, which gives the amount of **"Winner Aces"**. The true meaning behind the variable is labeled on the *y-axis*.
+Take a look at the one time `Roger Federer` lost against `Rafael Nadal` on grass. `Roger` had 25 aces. Can you spot it?  
+```{r head2head , echo = FALSE}
+k = c("Roger Federer", "Rafael Nadal", "Novak Djokovic", "Andy Murray")
+#You could choose many other players here, the further back you go, the more missing values will appear. Talking about missing values: there could be done alot in this dataset, I have been very generous with NAs..
+
+inputPanel(
+  selectInput("Player_1", label = "Player 1:",
+              choices = k , selected = "Roger Federer"))
+inputPanel(
+selectInput("Player_2", label = "Player 2:",
+              choices = k , selected = "Rafael Nadal"))
+inputPanel(
+  selectInput("Variable", label = "Variable:",
+              choices = c("w_ace", "l_ace","winner_name", "loser_name","w_df", "l_df", 
+                          "w_svpt", "l_svpt", "w_1stIn", "l_1stIn",
+                          "w_1stWon", "l_1stWon", "w_2ndWon","l_2ndWon",
+                          "w_bpSaved", "l_bpSaved", "w_bpFaced" , "w_bpFaced",
+                          "w_breaks", "l_breaks", "w_breaks_conversion",         "l_breaks_conversion",
+                          "w_1stInPercentage", "l_1stInPercentage","w_1stInWonPercentage",
+                          "l_1stInWonPercentage", 
+                          "w_2ndIn", "l_2ndIn", "w_2ndInPercentage", "l_2ndInPercentage",
+                          "w_2ndWonPercentage", "l_2ndWonPercentage",
+                          "w_dfPercentage", "l_dfPercentage"
+                          )
+))
+
+renderPlot({head_to_head( x = input$Player_1, y = input$Player_2, w = input$Variable)})
+```
+Thank you for coming this far.
+I have been experimenting with a random forest approach to forecast a player's loss/victory with the opponent's out-of-the-game predictors, such as `hand`, `height`, `rank`, `seat` etc..
+I will share it when it is ready..
+
+---
